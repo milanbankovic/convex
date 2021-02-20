@@ -14,6 +14,11 @@ struct conf_data {
   unsigned _struct_index;
   std::vector<permutation_ptr> _eq_perms_p;
   std::vector<permutation_ptr> _eq_perms;
+#ifdef _ORDER_TYPES
+  std::vector<permutation_ptr> _m_eq_perms_p;
+  std::vector<permutation_ptr> _m_eq_perms;
+#endif
+  
 };
 
 
@@ -41,15 +46,20 @@ void enumerate_configurations(unsigned limit_size)
   std::vector<struct_node> new_structs;
   
   std::vector<permutation_ptr> new_perms;
-  
+#ifdef _ORDER_TYPES
+  std::vector<permutation_ptr> m_new_perms;
+#endif
   // For n=3, we have only one structure [3] (with index 0 in the
   // structs vector), and only one configuration "-" of that structure
   // The automorphisms of this configuration are all cyclic
   // permutations, and there are no previous automorphisms, since
   // there are no outher hulls.
   new_structs.push_back(struct_node { structure { 3 }, NO_CHILD, NO_CHILD });
+#ifdef _ORDER_TYPES
+  new_configs.push_back(conf_data { { false }, 0, {}, cyclic_permutations(3), {}, mirrored_cyclic_permutations(3) }); 
+#else
   new_configs.push_back(conf_data { { false }, 0, {}, cyclic_permutations(3) });
-
+#endif
 
 #ifdef PRINT
   std::vector<conf_data> temp_configs[2];
@@ -70,6 +80,9 @@ void enumerate_configurations(unsigned limit_size)
       new_structs.clear();
       
       unsigned long count_configs = 0;
+#ifdef _ORDER_TYPES
+      unsigned long count_achiral = 0;
+#endif
       
       configuration_generator conf_gen(size);
             
@@ -80,6 +93,10 @@ void enumerate_configurations(unsigned limit_size)
 	  const configuration & prev_config = prev_configs[i]._conf;
 	  const std::vector<permutation_ptr> & prev_perms  = prev_configs[i]._eq_perms;
 	  const std::vector<permutation_ptr> & prev_perms_p = prev_configs[i]._eq_perms_p;
+#ifdef _ORDER_TYPES
+	  const std::vector<permutation_ptr> & m_prev_perms  = prev_configs[i]._m_eq_perms;
+	  const std::vector<permutation_ptr> & m_prev_perms_p = prev_configs[i]._m_eq_perms_p;
+#endif
 	  struct_node & prev_struct_node = prev_structs[prev_configs[i]._struct_index];
 	  const structure & prev_struct = prev_struct_node._struct;
 	  unsigned long c_conf = count_configs;
@@ -140,14 +157,26 @@ void enumerate_configurations(unsigned limit_size)
 	      // prev_config, so we should consider the previous
 	      // automorphisms of the prev_config.
 	      const std::vector<permutation_ptr> & pr_perms = str.back() == 1 ? prev_perms : prev_perms_p;
-
+#ifdef _ORDER_TYPES
+	      const std::vector<permutation_ptr> & m_pr_perms = str.back() == 1 ? m_prev_perms : m_prev_perms_p;
+#endif
 	      while(conf_gen.generate_next_configuration(new_config))
 		{
 		  new_perms.clear();
-		  if(is_canonical(new_config, str.size(), pr_perms, size, new_perms))
+#ifdef _ORDER_TYPES
+		  m_new_perms.clear();
+		  if(is_canonical(new_config, str.size(), pr_perms, m_pr_perms, size, new_perms, m_new_perms))
+#else
+		    if(is_canonical(new_config, str.size(), pr_perms, size, new_perms))
+#endif
 		    {
 		      //	      std::cout << "CANONICAL: " << new_config << std::endl;
 		      count_configs++;
+#ifdef _ORDER_TYPES
+		      if(m_new_perms.size() != 0)
+			count_achiral++;
+#endif
+		      
 #ifndef PRINT
 		      if(size != limit_size)
 #endif
@@ -156,9 +185,17 @@ void enumerate_configurations(unsigned limit_size)
 			  // of new_config, and its own automorphisms
 			  // are new_perms, return by is_canonical()
 #ifdef PRINT
-			  temp_configs[k].push_back(conf_data { new_config, s_index, pr_perms, new_perms });
+#ifdef _ORDER_TYPES
+			  temp_configs[k].push_back(conf_data { new_config, s_index, pr_perms, new_perms, m_pr_perms, m_new_perms });
+#else
+			  temp_configs[k].push_back(conf_data { new_config, s_index, pr_perms, new_perms });			  
+#endif
+#else
+#ifdef _ORDER_TYPES
+			  new_configs.push_back(conf_data { new_config, s_index, pr_perms, new_perms, m_pr_perms, m_new_perms });
 #else
 			  new_configs.push_back(conf_data { new_config, s_index, pr_perms, new_perms });
+#endif
 #endif
 			}
 		    }
@@ -190,8 +227,12 @@ void enumerate_configurations(unsigned limit_size)
 	    std::cout << "Processed " << i << " old configs" << std::endl;
 #endif     
 	}
-#ifndef PRINT    
+#ifndef PRINT
+#ifdef _ORDER_TYPES
+      std::cout << "Configs of size " << size << ": " << count_configs <<  " (mirror-symmetric: " << count_achiral << ", num of structs: " << new_structs.size() << ")" << std::endl;
+#else
       std::cout << "Configs of size " << size << ": " << count_configs << " (num of structs: " << new_structs.size() << ")" << std::endl;
+#endif
 #endif
     }
 }

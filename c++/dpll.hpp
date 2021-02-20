@@ -245,7 +245,7 @@ public:
 	    
 	_long_clauses.push_back(&cl);
 	_inactive_lists[cl[0]].push_back(&cl);
-      }    
+      }
   }
 
   unsigned num_of_watched_clauses()

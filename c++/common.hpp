@@ -157,6 +157,17 @@ void initial_permutation(permutation & perm, unsigned size)
 }
 
 
+#ifdef _ORDER_TYPES
+// Generate mirrored initial permutation { size - 1, size - 2, ..., 2, 1, 0 }
+void mirrored_initial_permutation(permutation & perm, unsigned size)
+{
+  perm.resize(size);
+  for(unsigned i = 0; i < size; i++)
+    perm[i] = size - 1 - i;
+}
+#endif
+
+
 // Triplet of points <p,q,r>
 using triplet = std::tuple<unsigned, unsigned, unsigned>;
 
@@ -275,10 +286,18 @@ std::ostream & operator << (std::ostream & ostr, const structure & str)
    index of the first point in the innermost hull (since we are
    permuting only the innermost hull). In new_perm the automorphisms
    of the configuration are stored. */
+#ifdef _ORDER_TYPES
 bool search_smaller_permutation(permutation & perm,
 				unsigned k,
 				const configuration & conf,
-				std::vector<permutation_ptr> & new_perms)
+				std::vector<permutation_ptr> & new_perms,
+				bool mirrored = false)
+#else
+  bool search_smaller_permutation(permutation & perm,
+				  unsigned k,
+				  const configuration & conf,
+				  std::vector<permutation_ptr> & new_perms)
+#endif
 {
 #ifndef _PARALLEL
   static std::vector<std::vector<unsigned>> equals(13);
@@ -312,7 +331,11 @@ bool search_smaller_permutation(permutation & perm,
 	      bool positive = triplet_positive(trans_tr);
 	      normalize_triplet(trans_tr);
 	      unsigned tr_pos = triplet_position(trans_tr);
+#ifdef _ORDER_TYPES
+	      bool new_conf = positive && !mirrored || !positive && mirrored ? conf[tr_pos] : !conf[tr_pos];
+#else
 	      bool new_conf = positive ? conf[tr_pos] : !conf[tr_pos];
+#endif
 	      if(!new_conf && conf[j])
 		{
 		  return true;  // FOUND SMALLER CONFIGURATION
@@ -342,7 +365,7 @@ bool search_smaller_permutation(permutation & perm,
       if(!equals[k].empty()) // if it is an authomorphism...
 	{
 	  assert( std::find(new_perms.begin(), new_perms.end(), get_perm_ptr(perm)) == new_perms.end() );
-	  new_perms.push_back(get_perm_ptr(perm));	      
+	  new_perms.push_back(get_perm_ptr(perm));
 	}
       return false;
     }
@@ -353,7 +376,11 @@ bool search_smaller_permutation(permutation & perm,
     {
       std::swap(perm[equals[k][i]], perm[k]);
 
-      if(search_smaller_permutation(perm, k + 1, conf, new_perms))	
+#ifdef _ORDER_TYPES
+      if(search_smaller_permutation(perm, k + 1, conf, new_perms, mirrored))
+#else
+	if(search_smaller_permutation(perm, k + 1, conf, new_perms))
+#endif
 	return true; 
 	  
       std::swap(perm[equals[k][i]], perm[k]);
@@ -366,18 +393,28 @@ bool search_smaller_permutation(permutation & perm,
 class cyclic_store {
 private:
   std::vector<std::vector<permutation_ptr>> _cyclic_permutations;
-
+#ifdef _ORDER_TYPES
+  std::vector<std::vector<permutation_ptr>> _mirrored_cyclic_permutations;
+#endif
+  
   void init_cyclic_permutations(unsigned size)
   {
     std::vector<permutation_ptr> & retval = _cyclic_permutations[size];
-  
+#ifdef _ORDER_TYPES
+    std::vector<permutation_ptr> & m_retval = _mirrored_cyclic_permutations[size];
+#endif
+    
     if(!retval.empty())
       return;
   
     permutation perm;
     initial_permutation(perm, size);
     retval.push_back(get_perm_ptr(perm));
-
+#ifdef _ORDER_TYPES
+    mirrored_initial_permutation(perm, size);
+    m_retval.push_back(get_perm_ptr(perm));
+#endif
+    
     if(size == 0)
       return;
   
@@ -386,11 +423,19 @@ private:
 	perm = *retval.back();
 	std::rotate(perm.begin(), std::next(perm.begin()), perm.end());
 	retval.push_back(get_perm_ptr(perm));
+#ifdef _ORDER_TYPES
+	perm = *m_retval.back();
+	std::rotate(perm.begin(), std::next(perm.begin()), perm.end());
+	m_retval.push_back(get_perm_ptr(perm));
+#endif	
       }
   }
 
   cyclic_store(unsigned limit_size)
     :_cyclic_permutations(limit_size + 1)
+#ifdef _ORDER_TYPES
+    ,_mirrored_cyclic_permutations(limit_size + 1)
+#endif
   {
     for(unsigned i = 0; i <= limit_size; i++)
       init_cyclic_permutations(i);
@@ -404,6 +449,13 @@ public:
     return _cyclic_permutations[size];
   }
 
+#ifdef _ORDER_TYPES
+  const std::vector<permutation_ptr> & mirrored_cyclic_permutations(unsigned size) const
+  {
+    return _mirrored_cyclic_permutations[size];
+  }  
+#endif
+  
   static void init_instance(unsigned limit_size)
   {
     if(_instance == nullptr)
@@ -426,11 +478,19 @@ public:
 
 cyclic_store * cyclic_store::_instance = nullptr;
 
-
+inline
 const std::vector<permutation_ptr> & cyclic_permutations(unsigned size)
 {
   return cyclic_store::get_instance()->cyclic_permutations(size);
 }
+
+#ifdef _ORDER_TYPES
+inline
+const std::vector<permutation_ptr> & mirrored_cyclic_permutations(unsigned size)
+{
+  return cyclic_store::get_instance()->mirrored_cyclic_permutations(size);
+}
+#endif
 
 class smallest_configurations {
 private:
@@ -483,8 +543,15 @@ inline
 bool is_canonical(const configuration & conf,
 		  unsigned struct_size, 
 		  const std::vector<permutation_ptr> & prev_perms,
+#ifdef _ORDER_TYPES
+		  const std::vector<permutation_ptr> & m_prev_perms,
+#endif
 		  unsigned size,
-		  std::vector<permutation_ptr> & new_perms)
+		  std::vector<permutation_ptr> & new_perms
+#ifdef _ORDER_TYPES
+		  , std::vector<permutation_ptr> & m_new_perms
+#endif
+		  )
 {
   // Special case: convex poligon -- only all-false configuration is
   // canonical
@@ -495,6 +562,9 @@ bool is_canonical(const configuration & conf,
       else
 	{
 	  new_perms = cyclic_permutations(size);
+#ifdef _ORDER_TYPES
+	  m_new_perms = mirrored_cyclic_permutations(size);
+#endif
 	  return true;
 	}
     }
@@ -502,7 +572,11 @@ bool is_canonical(const configuration & conf,
   permutation perm;
   // Special case: previous structure has only trivial automorhism,
   // and only one point is in the last hull
-  if(prev_perms.size() == 1 && (*prev_perms[0]).size() == size - 1)
+#ifdef _ORDER_TYPES
+  if(m_prev_perms.size() == 0 && prev_perms.size() == 1 && (*prev_perms[0]).size() == size - 1)
+#else
+    if(prev_perms.size() == 1 && (*prev_perms[0]).size() == size - 1)
+#endif
     {
       perm = *prev_perms[0];
       perm.push_back(size - 1);
@@ -524,6 +598,24 @@ bool is_canonical(const configuration & conf,
 	  return false;
 	}
     }
+
+#ifdef _ORDER_TYPES
+  // General case: for all authomorphisms of the previous structure...
+  for(const auto & m_prev_perm : m_prev_perms)
+    {
+      perm = *m_prev_perm;
+
+      unsigned k = perm.size();
+      for(unsigned t = k; t < size; t++)
+	perm.push_back(t);
+      
+      if(search_smaller_permutation(perm, k, conf, m_new_perms, true))
+	{
+	  return false;
+	}
+    }  
+#endif
+  
   return true;
 }
 

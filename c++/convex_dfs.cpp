@@ -5,6 +5,11 @@ struct conf_data_dfs {
   structure _struct;
   std::vector<permutation_ptr> _eq_perms_p;
   std::vector<permutation_ptr> _eq_perms;
+#ifdef _ORDER_TYPES
+  std::vector<permutation_ptr> _m_eq_perms_p;
+  std::vector<permutation_ptr> _m_eq_perms;
+#endif
+
 };
 
 
@@ -21,10 +26,54 @@ void print_progress(unsigned long new_count)
     }
 }
 
-#if defined PRINT && !defined _PARALLEL
-unsigned long dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, unsigned limit_size, unsigned long counter)
+#ifdef _ORDER_TYPES
+struct ret_type {
+  unsigned long _confs;
+  unsigned long _achirals;
+
+  ret_type(unsigned long x = 0, unsigned long y = 0)
+    :_confs(x),
+     _achirals(y)
+  {}
+  
+  const ret_type & operator ++ ()
+  {
+    _confs++;
+    return *this;
+  }
+
+  void increment_achirals()
+  {
+    _achirals++;
+  }
+
+  ret_type & operator += (const ret_type & rt)
+  {
+    _confs += rt._confs;
+    _achirals += rt._achirals;
+    return *this;
+  }
+
+  operator unsigned long() const 
+  {
+    return _confs;
+  }
+
+  ret_type operator + (const ret_type & rt) const
+  {
+    return ret_type { _confs + rt._confs, _achirals + rt._achirals };
+  }
+  
+};
 #else
-  unsigned long dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, unsigned limit_size)
+using ret_type = unsigned long;
+#endif
+
+
+#if defined PRINT && !defined _PARALLEL
+ret_type dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, unsigned limit_size, unsigned long counter)
+#else
+  ret_type dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, unsigned limit_size)
 #endif
 {
   auto lambda = [] ()
@@ -45,9 +94,14 @@ unsigned long dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, u
   const configuration & prev_config = prev_cd._conf;
   const std::vector<permutation_ptr> & prev_perms  = prev_cd._eq_perms;
   const std::vector<permutation_ptr> & prev_perms_p = prev_cd._eq_perms_p;
+#ifdef _ORDER_TYPES
+  const std::vector<permutation_ptr> & m_prev_perms  = prev_cd._m_eq_perms;
+  const std::vector<permutation_ptr> & m_prev_perms_p = prev_cd._m_eq_perms_p;
+#endif
   const structure & prev_struct = prev_cd._struct;
   unsigned size = prev_size + 1;
-  unsigned long count_configs = 0;
+  ret_type count_configs = 0;
+  
   
   configuration_generator & conf_gen = *conf_gens[size];
   
@@ -69,6 +123,10 @@ unsigned long dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, u
 #endif
 
   std::vector<permutation_ptr> new_perms;
+#ifdef _ORDER_TYPES
+  std::vector<permutation_ptr> m_new_perms;
+#endif
+  
   std::vector<conf_data_dfs> new_configs;
   
   // For each augmented structure...
@@ -88,14 +146,28 @@ unsigned long dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, u
       // prev_config, so we should consider the previous
       // automorphisms of the prev_config.
       const std::vector<permutation_ptr> & pr_perms = str.back() == 1 ? prev_perms : prev_perms_p;
+#ifdef _ORDER_TYPES
+      const std::vector<permutation_ptr> & m_pr_perms = str.back() == 1 ? m_prev_perms : m_prev_perms_p;
+#endif
       configuration new_config = smallest_configuration(size);
       
       while(conf_gen.generate_next_configuration(new_config))
 	{
 	  new_perms.clear();
+#ifdef _ORDER_TYPES
+	  m_new_perms.clear();
+	  if(is_canonical(new_config, str.size(), pr_perms, m_pr_perms, size, new_perms, m_new_perms))
+#else
 	  if(is_canonical(new_config, str.size(), pr_perms, size, new_perms))
+#endif
 	    {
-	      count_configs++;
+	      ++count_configs;
+#ifdef _ORDER_TYPES
+	      if(m_new_perms.size() != 0)
+		count_configs.increment_achirals();
+#endif
+
+	      
 #if !defined PRINT || defined _PARALLEL
 	      if(size != limit_size)
 #endif
@@ -104,9 +176,17 @@ unsigned long dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, u
 		  // of new_config, and its own automorphisms
 		  // are new_perms, return by is_canonical()
 #if defined PRINT && !defined _PARALLEL
+#ifdef _ORDER_TYPES
+		  temp_configs[k].push_back(conf_data_dfs { new_config, str, pr_perms, new_perms , m_pr_perms, m_new_perms });
+#else
 		  temp_configs[k].push_back(conf_data_dfs { new_config, str, pr_perms, new_perms });
+#endif
+#else
+#ifdef _ORDER_TYPES
+		  new_configs.push_back(conf_data_dfs { new_config, str, pr_perms, new_perms, m_pr_perms, m_new_perms });
 #else
 		  new_configs.push_back(conf_data_dfs { new_config, str, pr_perms, new_perms });
+#endif
 #endif
 		}
 	    }
@@ -142,8 +222,8 @@ unsigned long dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, u
 #endif
 	}
 #else
-      count_configs = tbb::parallel_reduce(tbb::blocked_range<unsigned long>(0, new_configs.size()), 0UL,
-					   [&new_configs, size, limit_size](const tbb::blocked_range<unsigned long> & r, unsigned long x) -> unsigned long
+      count_configs = tbb::parallel_reduce(tbb::blocked_range<unsigned long>(0, new_configs.size()), ret_type(0UL),
+					   [&new_configs, size, limit_size](const tbb::blocked_range<unsigned long> & r, ret_type x) -> ret_type
 					   {
 					     for(unsigned long i = r.begin(), end = r.end(); i != end; ++i)
 					       {
@@ -151,7 +231,7 @@ unsigned long dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, u
 					       }
 					     return x;
 					   },
-					   [](unsigned long x, unsigned long y) -> unsigned long
+					   [](ret_type x, ret_type y) -> ret_type
 					   {
 					     return x + y;
 					   });      
@@ -166,6 +246,7 @@ unsigned long dfs_enumerate(const conf_data_dfs & prev_cd, unsigned prev_size, u
 	}
     }
 #endif
+
   return count_configs;
 }
 
@@ -174,7 +255,7 @@ void enumerate_configurations_dfs(unsigned limit_size)
   if(limit_size == 3)
     {
 #if !defined PRINT || defined _PARALLEL
-      std::cout << "Configs of size 3: 1" << std::endl;
+      std::cout << "Configs of size 3: 1 (mirror-symmetric: 1)" << std::endl;
 #else
       std::cout << "1: -" << std::endl;
 #endif
@@ -182,10 +263,20 @@ void enumerate_configurations_dfs(unsigned limit_size)
     }
 
 #if defined PRINT && !defined _PARALLEL
-  unsigned long count = dfs_enumerate(conf_data_dfs { { false }, structure { 3 }, {}, cyclic_permutations(3) },  3, limit_size, 0);
+#ifdef _ORDER_TYPES
+  ret_type count = dfs_enumerate(conf_data_dfs { { false }, structure { 3 }, {}, cyclic_permutations(3), {}, mirrored_cyclic_permutations(3) },  3, limit_size, 0);
+#else  
+  ret_type count = dfs_enumerate(conf_data_dfs { { false }, structure { 3 }, {}, cyclic_permutations(3) },  3, limit_size, 0);
+#endif
 #else
-  unsigned long count = dfs_enumerate(conf_data_dfs { { false }, structure { 3 }, {}, cyclic_permutations(3) },  3, limit_size);
+#ifdef _ORDER_TYPES
+  ret_type count = dfs_enumerate(conf_data_dfs { { false }, structure { 3 }, {}, cyclic_permutations(3), {}, mirrored_cyclic_permutations(3) },  3, limit_size);
+  std::cout << "Configs of size " << limit_size << ": " << count._confs << " (mirror-symmetric: " << count._achirals << ")" << std::endl;
+#else  
+  ret_type count = dfs_enumerate(conf_data_dfs { { false }, structure { 3 }, {}, cyclic_permutations(3) },  3, limit_size);
   std::cout << "Configs of size " << limit_size << ": " << count << std::endl;
+#endif
+
 #endif
 }
 
